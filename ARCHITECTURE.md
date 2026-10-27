@@ -66,7 +66,11 @@ export function parseRentRollCsv(csv: string): TenantUnit[];
 | `DELETE /api/projects/:id` | – | `{ ok: true }` |
 | `POST /api/projects/:id/rerun` | – | `{ run: Run }` |
 | `GET /api/projects/:id/stream` | – | SSE; `event: snapshot` with `data: StreamSnapshot` on every change (≥ every 1.5s while running); closes ~2s after run completes |
-| `POST /api/projects/:id/documents` | `{ title: string; url?: string; text: string }` | `{ run: Run }` — runs extraction + scoring on a pasted funding document (QAP/NOFA), adds a program with `discoveredBy: "uploaded_document"` |
+| `POST /api/projects/:id/documents` | `DocumentSourceInput` (one of `text` / `pdfBase64` / `url` / `libraryKey`; body limit 60 MB) | `{ run: Run }` — document pipeline → scoring → compliance; adds a program with `discoveredBy: "uploaded_document"` and `extraction` provenance. The extraction task carries `pipelines: PipelineStats[]` |
+| `POST /api/library/preview` | `DocumentSourceInput` | `PipelineStats` with `llmSkipped: true` — free local page-relevance pass + cost estimate, plus `cacheHit` if the library already has this document |
+| `GET /api/library` | – | `LibrarySource[]` |
+| `GET /api/library/:sourceKey` | – | `LibrarySourceDetail` (sourceKey URL-encoded) |
+| `DELETE /api/library/:sourceKey` | – | `{ ok: true }` — invalidates cached rules for that source |
 | `PATCH /api/projects/:id/programs/:programId` | `{ pursuit: PursuitStatus }` | `{ project: Project }` |
 | `GET /api/projects/:id/compliance` | – | `{ report: ComplianceReport, data: ComplianceData }` (auto-creates sample data if none) |
 | `PUT /api/projects/:id/compliance/units` | `{ units?: TenantUnit[]; csv?: string }` | `{ report, data }` |
@@ -94,3 +98,23 @@ export function parseRentRollCsv(csv: string): TenantUnit[];
 
 Steps should stream with small realistic delays (150–600ms) so the "in flight" view is
 legible even when everything is local.
+
+## Document pipeline (server/docs/)
+
+Long funding documents (QAPs run 100–400 pages) are never sent whole to the extraction model.
+
+1. **Ingest** (`ingest.ts`) — PDF (per-page text via `unpdf`), URL (PDF or HTML), or pasted text
+   (split on form feeds / page markers / ~3.5k-char chunks). Pages are normalized and hashed.
+2. **Local relevance pass** (`relevance.ts`, free) — scores each page on rule vocabulary
+   (points, thresholds, AMI/set-asides, rent/cost limits, site/amenity, readiness, compliance)
+   and penalizes TOCs, forms, signature pages and blank pages. High scores are kept, low scores
+   dropped, the ambiguous middle band goes to triage.
+3. **Triage** (`triage.ts`) — ambiguous pages (first ~1.2k chars each) go in batches of ~20 to a
+   cheap model (`GROUNDWORK_TRIAGE_MODEL`, default `claude-haiku-5-5`) for a relevant / not verdict.
+4. **Sectioned extraction** (`extract.ts`) — relevant pages (±1 neighbor) merge into contiguous
+   sections of ≤ ~12 pages; each section goes to the extraction model (`claude-opus-5-5`) in
+   parallel with a cached system prompt; results are merged and de-duplicated.
+5. **Rule library** (`library.ts`, `server/.data/library.json`) — keyed by funding source
+   (`sourceName` / URL). Same document hash → full hit, zero model calls. New edition of the same
+   source → per-page triage verdicts and per-section extractions whose text hash is unchanged are
+   reused; only changed sections are re-read. Cost/savings are tracked per source.

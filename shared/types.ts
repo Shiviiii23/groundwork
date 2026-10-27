@@ -181,6 +181,7 @@ export interface FundingProgram {
   rules: Rule[];
   complianceRules: ComplianceRule[];
   pursuit?: PursuitStatus;
+  extraction?: ExtractionProvenance; // set when rules came from the document pipeline / rule library
 }
 
 export type RuleStatus = "pass" | "fail" | "partial" | "needs_info";
@@ -239,6 +240,7 @@ export interface AgentTask {
   finishedAt?: string;
   steps: AgentStep[];
   summary?: string; // one line result when done
+  pipelines?: PipelineStats[]; // document pipelines run by this task (extraction agent)
 }
 
 export interface Run {
@@ -388,6 +390,92 @@ export interface SampleProject {
 export interface StreamSnapshot {
   project: Project;
   run?: Run;
+}
+
+// ───────────────────────── Document pipeline & rule library ─────────────────────────
+
+/**
+ * A funding document to turn into rules. Provide exactly one of text / pdfBase64 / url,
+ * or libraryKey to reuse rules already in the rule library (no model calls).
+ */
+export interface DocumentSourceInput {
+  title: string;
+  sourceName?: string; // funding source identity used as the cache key, e.g. "CA TCAC 9% QAP"; defaults to title
+  url?: string;
+  text?: string;
+  pdfBase64?: string;
+  libraryKey?: string;
+}
+
+export interface PipelineSection {
+  pages: [number, number]; // inclusive 1-based page range sent to extraction
+  tokensEst: number;
+  cached: boolean; // reused from the rule library (same text seen before for this source)
+  rules: number;
+}
+
+export interface PipelineStats {
+  sourceKey: string;
+  sourceName: string;
+  docHash: string;
+  pageCount: number;
+  docTokensEst: number; // whole-document size, ~chars/4
+  cacheHit: "full" | "partial" | "none";
+  keywordKept: number; // pages auto-kept by the local relevance pass
+  keywordDropped: number; // pages discarded by the local pass (TOC, forms, boilerplate)
+  triaged: number; // ambiguous pages sent to the cheap triage model
+  triageKept: number;
+  relevantPages: number[];
+  sections: PipelineSection[];
+  llmCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number; // actual spend for this run
+  fullReadCostUsdEst: number; // estimated spend of sending the whole document to the extraction model
+  savedUsdEst: number; // fullReadCostUsdEst (or the cached version's original cost) - costUsd
+  durationMs: number;
+  llmSkipped?: boolean; // Claude disabled: only the free local relevance pass ran
+}
+
+export interface ExtractionProvenance {
+  sourceKey: string;
+  docHash: string;
+  relevantPages: number[];
+  pageCount: number;
+  cacheHit: "full" | "partial" | "none";
+  extractedAt: string;
+}
+
+export interface LibraryVersion {
+  docHash: string;
+  title: string;
+  url?: string;
+  pageCount: number;
+  extractedAt: string;
+  ruleCount: number;
+  complianceCount: number;
+  relevantPages: number[];
+  stats: PipelineStats;
+}
+
+export interface LibrarySource {
+  sourceKey: string;
+  name: string;
+  administrator?: string;
+  url?: string;
+  versions: LibraryVersion[]; // newest first
+  hits: number; // times rules were served from cache
+  lastUsedAt: string;
+  totalCostUsd: number; // spent extracting all versions
+  savedUsd: number; // cumulative estimated savings from cache hits and page filtering
+}
+
+export interface LibrarySourceDetail {
+  source: LibrarySource;
+  program: Pick<FundingProgram, "name" | "shortName" | "administrator" | "jurisdiction" | "type" | "awardType" | "description" | "typicalAward" | "applicationCycle">;
+  rules: Rule[]; // programId is "" in the library; ids are rehydrated when applied to a project
+  complianceRules: ComplianceRule[];
 }
 
 export interface HealthInfo {

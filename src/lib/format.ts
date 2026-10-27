@@ -64,3 +64,36 @@ export const PROGRAM_TYPE_LABEL: Record<string, string> = {
   local_program: "Local program",
   private: "Private",
 };
+
+/** Money with cents for small amounts (AI spend), compact otherwise. */
+export function usd(n: number | undefined | null): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (Math.abs(n) < 100) return `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(2)}`;
+  return money(n);
+}
+
+/** Compact token counts: 412300 → "412K". */
+export function tokens(n: number | undefined | null): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
+  return String(Math.round(n));
+}
+
+/** Collapses page numbers to ranges: [1,2,3,7,9,10] → "1–3, 7, 9–10". */
+export function pageRanges(pages: number[]): string {
+  const sorted = [...new Set(pages)].sort((a, b) => a - b);
+  const out: string[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const start = sorted[i];
+    while (i + 1 < sorted.length && sorted[i + 1] === sorted[i] + 1) i++;
+    out.push(start === sorted[i] ? `${start}` : `${start}–${sorted[i]}`);
+  }
+  return out.join(", ");
+}
+
+export function bytes(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)} KB`;
+  return `${n} B`;
+}

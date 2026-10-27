@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Building2, FolderKanban, Landmark, Plus, ShieldCheck, Sparkles, Database } from "lucide-react";
+import { BookMarked, Building2, FolderKanban, Landmark, Plus, ShieldCheck, Sparkles, Database } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useHealth } from "./lib/hooks";
@@ -10,6 +10,7 @@ import ProgramDetailPage from "./pages/ProgramDetail";
 import FundingPage from "./pages/Funding";
 import ComplianceListPage from "./pages/ComplianceList";
 import ComplianceDashboard from "./pages/ComplianceDashboard";
+import LibraryPage from "./pages/Library";
 
 function NavItem({ to, icon, children, end }: { to: string; icon: ReactNode; children: ReactNode; end?: boolean }) {
   return (
@@ -84,6 +85,9 @@ export default function App() {
           <NavItem to="/funding" icon={<Landmark size={16} />}>
             Funding
           </NavItem>
+          <NavItem to="/library" icon={<BookMarked size={16} />}>
+            Rule library
+          </NavItem>
           <NavItem to="/compliance" icon={<ShieldCheck size={16} />}>
             Compliance
           </NavItem>
@@ -101,6 +105,7 @@ export default function App() {
           <nav className="flex gap-3 text-sm md:hidden">
             <NavLink to="/projects">Projects</NavLink>
             <NavLink to="/funding">Funding</NavLink>
+            <NavLink to="/library">Library</NavLink>
             <NavLink to="/compliance">Compliance</NavLink>
           </nav>
           <div className="hidden md:block" />
@@ -114,6 +119,7 @@ export default function App() {
             <Route path="/projects/:id" element={<ProjectDashboard />} />
             <Route path="/projects/:id/programs/:programId" element={<ProgramDetailPage />} />
             <Route path="/funding" element={<FundingPage />} />
+            <Route path="/library" element={<LibraryPage />} />
             <Route path="/compliance" element={<ComplianceListPage />} />
             <Route path="/compliance/:id" element={<ComplianceDashboard />} />
             <Route path="*" element={<Navigate to="/projects" replace />} />

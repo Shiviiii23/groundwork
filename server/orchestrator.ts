@@ -1,8 +1,9 @@
-import type { AgentId, FundingProgram, Project, Run } from "../shared/types";
+import type { AgentId, DocumentSourceInput, FundingProgram, Project, Run } from "../shared/types";
 import { complianceAgent } from "./agents/compliance";
 import { type Agent, makeCtx, newTask } from "./agents/context";
 import { discoveryAgent } from "./agents/discovery";
-import { extractInto, extractionAgent } from "./agents/extraction";
+import { extractDocumentInto, extractionAgent } from "./agents/extraction";
+import { sourceKeyFor } from "./docs/library";
 import { geoAgent } from "./agents/geo";
 import { intakeAgent } from "./agents/intake";
 import { scoringAgent } from "./agents/scoring";
@@ -87,9 +88,11 @@ export function startRun(project: Project): Run {
   return run;
 }
 
-/** Uploaded funding document: extraction → scoring → compliance on a new program. */
-export function startDocumentRun(project: Project, doc: { title: string; url?: string; text: string }): Run {
-  const id = `doc-${Date.now().toString(36)}`;
+/** Uploaded funding document: document pipeline → scoring → compliance on a new program. */
+export function startDocumentRun(project: Project, doc: DocumentSourceInput): Run {
+  const sourceKey = doc.libraryKey ?? sourceKeyFor(doc.sourceName || doc.title);
+  // One program per funding source: re-adding a source (e.g. a new edition) replaces it.
+  const id = `doc-${sourceKey}`.slice(0, 60);
   const program: FundingProgram = {
     id,
     name: doc.title,
@@ -98,7 +101,7 @@ export function startDocumentRun(project: Project, doc: { title: string; url?: s
     awardType: "soft_loan",
     administrator: "Uploaded document",
     jurisdiction: project.input.state,
-    description: `Rules extracted from an uploaded document (${doc.text.length.toLocaleString()} characters).`,
+    description: `Rules extracted from "${doc.title}".`,
     typicalAward: "See document",
     applicationCycle: "See document",
     url: doc.url ?? "",
@@ -110,14 +113,12 @@ export function startDocumentRun(project: Project, doc: { title: string; url?: s
   const run = createRun(project, ["extraction", "scoring", "compliance"]);
   void (async () => {
     const extracted = await runTask(project, run, "extraction", async (ctx) => {
-      ctx.step("tool", `Claude: extracting rules from "${doc.title}"`, `${doc.text.length.toLocaleString()} characters`);
-      ctx.progress(15);
-      await extractInto(ctx, program, doc.text);
+      const stats = await extractDocumentInto(ctx, program, { ...doc, sourceKey: doc.libraryKey ? undefined : sourceKey });
       if (!program.rules.length) throw new Error("No scoreable rules could be extracted from the document");
       project.programs = [...project.programs.filter((p) => p.id !== id), program];
       ctx.saveProject();
-      ctx.step("result", `${program.name}: ${program.rules.length} rules, ${program.complianceRules.length} compliance obligations`);
-      return `Added ${program.shortName} with ${program.rules.length} rules`;
+      const how = stats.cacheHit === "full" ? "from rule library, $0" : `$${stats.costUsd.toFixed(2)} AI spend, ${stats.relevantPages.length}/${stats.pageCount} pages read`;
+      return `Added ${program.shortName}: ${program.rules.length} rules (${how})`;
     });
     if (!extracted) {
       skip(run, "scoring", "Skipped: extraction failed");

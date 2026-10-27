@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { AgentId, AgentStep, AgentTask, Run } from "@shared/types";
 import { elapsed } from "../lib/format";
 import { useTicker } from "../lib/hooks";
+import PipelineCard, { pipelineSummary } from "./PipelineCard";
 import { Card, Pill, ProgressBar, TaskStatusIcon } from "./ui";
 
 const AGENT_ICON: Record<AgentId, ReactNode> = {
@@ -83,6 +84,11 @@ function TaskRow({ task, defaultOpen }: { task: AgentTask; defaultOpen: boolean 
           <div className="truncate text-xs text-zinc-500">
             {task.status === "done" || task.status === "error" ? task.summary ?? latest?.message : latest?.message ?? "Queued"}
           </div>
+          {!open && task.pipelines?.length ? (
+            <div className="tnum mt-0.5 truncate text-[11px] font-medium text-indigo-700">
+              {task.pipelines.map(pipelineSummary).join("  ·  ")}
+            </div>
+          ) : null}
           <ProgressBar
             className="mt-2 !h-1"
             value={task.status === "done" ? 100 : task.progress}
@@ -96,7 +102,8 @@ function TaskRow({ task, defaultOpen }: { task: AgentTask; defaultOpen: boolean 
         <span className="text-zinc-400">{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</span>
       </button>
       {open && (
-        <div className="px-4 pb-4">
+        <div className="space-y-3 px-4 pb-4">
+          {task.pipelines?.map((p, i) => <PipelineCard key={`${p.sourceKey}-${i}`} p={p} />)}
           <StepLog steps={task.steps} />
         </div>
       )}

@@ -31,8 +31,29 @@ Without a key the app runs in **knowledge-base mode** using the 15 bundled progr
   evaluated by `server/engine/evaluate.ts` with the math shown for every rule.
 - **Compliance engine** (`server/engine/compliance.ts`): rent roll vs. income/rent limits, set-asides,
   recertifications, 140% rule, student rule, filing/inspection deadlines. CSV rent roll import.
+- **Document pipeline + rule library** (`server/docs/`): long QAPs/NOFAs are never read whole.
+  A free keyword pass drops TOCs, forms and boilerplate; a cheap model (Claude Haiku) triages the
+  ambiguous pages; only relevant sections go to the extraction model, in parallel. Results are
+  cached per funding source: re-adding a document costs $0, and a new edition re-reads only the
+  sections that changed. Browse and reuse cached rules on the **Rule library** page.
 
 See `ARCHITECTURE.md` for the API and module contract.
+
+### Tuning the document pipeline
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GROUNDWORK_TRIAGE_MODEL` | `claude-haiku-5-5` | model that triages ambiguous pages |
+| `GROUNDWORK_EXTRACT_EFFORT` | `medium` | effort for section extraction (`low` / `medium` / `high`) |
+
+Use the same **funding source name** for every edition of a program so cached work is reused.
+
+### Tests
+
+```bash
+npm run test:engine   # scoring + compliance engine
+npm run test:docs     # document pipeline (stubbed models, no API key needed)
+```
 
 ## Caveats
 

@@ -19,13 +19,13 @@ export function llmEnabled(): boolean {
 }
 
 let client: Anthropic | null = null;
-function anthropic(): Anthropic {
+export function anthropic(): Anthropic {
   if (!client) client = new Anthropic();
   return client;
 }
 
 // Server-side refusal fallback: routes a declined request to the server-defined default fallback model.
-const COMMON = {
+export const COMMON = {
   model: MODEL,
   betas: ["server-side-fallback-2026-07-01"],
   fallbacks: "default" as const,
@@ -36,7 +36,7 @@ type BetaMessage = Anthropic.Beta.Messages.BetaMessage;
 type BetaParams = Anthropic.Beta.Messages.MessageCreateParamsNonStreaming;
 
 /** Streams a request to completion, resuming on pause_turn (long server-tool loops). */
-async function runToCompletion(params: Omit<BetaParams, "stream">, maxContinuations = 4): Promise<BetaMessage> {
+export async function runToCompletion(params: Omit<BetaParams, "stream">, maxContinuations = 4): Promise<BetaMessage> {
   const messages = [...params.messages];
   for (let i = 0; ; i++) {
     const msg = await anthropic().beta.messages.stream({ ...params, messages }).finalMessage();
@@ -51,7 +51,7 @@ async function runToCompletion(params: Omit<BetaParams, "stream">, maxContinuati
   }
 }
 
-function finalText(msg: BetaMessage): string {
+export function finalText(msg: BetaMessage): string {
   return msg.content
     .filter((b): b is Anthropic.Beta.Messages.BetaTextBlock => b.type === "text")
     .map((b) => b.text)
@@ -176,7 +176,7 @@ const checkSchema = {
   ...flatCheck,
   properties: { ...flatCheck.properties, op: { type: "string", enum: [...OPS] }, checks: { type: "array", items: flatCheck } },
 };
-const EXTRACTION_SCHEMA = {
+export const EXTRACTION_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["program", "rules", "complianceRules"],
@@ -236,8 +236,8 @@ const EXTRACTION_SCHEMA = {
   },
 };
 
-type KV = { key: string; value: string | number }[];
-interface FlatCheckOut {
+export type KV = { key: string; value: string | number }[];
+export interface FlatCheckOut {
   op: string;
   field?: string;
   value?: string | number | boolean;
@@ -288,12 +288,7 @@ export interface ExtractionResult {
   dropped: number;
 }
 
-export async function extractRules(
-  programId: string,
-  meta: { name: string; administrator?: string; url?: string },
-  docText?: string,
-): Promise<ExtractionResult> {
-  const system = `You convert affordable-housing funding program documents (QAPs, NOFAs, program guidelines) into machine-checkable rules.
+export const EXTRACTION_SYSTEM = `You convert affordable-housing funding program documents (QAPs, NOFAs, program guidelines) into machine-checkable rules.
 
 ${describeDslForLLM()}
 
@@ -304,6 +299,20 @@ Output notes for this schema:
 - Cite the section of the source document in "citation" (e.g. "2025 NOFA §4.2(b)").
 - Only encode a rule if it can be expressed with the available fields; skip anything that cannot.
 - Also list the post-award compliance obligations (income/rent limits, recertification, reporting, inspections, affordability term).`;
+
+/** Raw extraction output as it comes back from the schema above. */
+export interface RawExtraction {
+  program: ExtractionResult["program"];
+  rules: (Omit<Rule, "check" | "programId"> & { check: FlatCheckOut })[];
+  complianceRules: { id: string; category: ComplianceRule["category"]; title: string; description: string; citation: string; frequency: ComplianceRule["frequency"]; kind: ComplianceCheckKind; params: KV }[];
+}
+
+export async function extractRules(
+  programId: string,
+  meta: { name: string; administrator?: string; url?: string },
+  docText?: string,
+): Promise<ExtractionResult & { usage: Anthropic.Beta.Messages.BetaUsage[] }> {
+  const system = EXTRACTION_SYSTEM;
 
   const docPart = docText
     ? `Program: ${meta.name}${meta.administrator ? ` (${meta.administrator})` : ""}\n\n<document>\n${docText}\n</document>`
@@ -316,10 +325,12 @@ Output notes for this schema:
     messages: [{ role: "user" as const, content: `${docPart}\n\nExtract the program metadata, eligibility thresholds, scoring criteria and compliance obligations.` }],
   };
 
-  let parsed: { program: ExtractionResult["program"]; rules: (Omit<Rule, "check" | "programId"> & { check: FlatCheckOut })[]; complianceRules: { id: string; category: ComplianceRule["category"]; title: string; description: string; citation: string; frequency: ComplianceRule["frequency"]; kind: ComplianceCheckKind; params: KV }[] };
+  let parsed: RawExtraction;
+  let usage: Anthropic.Beta.Messages.BetaUsage[];
   if (docText) {
     const msg = await runToCompletion({ ...base, output_config: { effort: "high", format: { type: "json_schema", schema: EXTRACTION_SCHEMA } } });
     parsed = JSON.parse(finalText(msg));
+    usage = [msg.usage];
   } else {
     // Web search results carry citations, which can't be combined with output_config.format — parse text instead.
     const msg = await runToCompletion({
@@ -329,8 +340,15 @@ Output notes for this schema:
       messages: [{ role: "user", content: `${base.messages[0].content}\n\nReply with ONLY a JSON object matching this JSON Schema:\n${JSON.stringify(EXTRACTION_SCHEMA)}` }],
     });
     parsed = parseJsonLoose(finalText(msg));
+    usage = [msg.usage];
   }
+  return { ...normalizeExtraction(parsed, programId, meta.name), usage };
+}
 
+/** Validates raw model output into evaluable rules; ids are prefixed with programId (may be ""). */
+export function normalizeExtraction(parsed: RawExtraction, programId: string, fallbackCitation: string): ExtractionResult {
+  const prefix = programId ? `${programId}.` : "";
+  const meta = { name: fallbackCitation };
   let dropped = 0;
   const rules: Rule[] = [];
   for (const [i, r] of (parsed.rules ?? []).entries()) {
@@ -340,7 +358,7 @@ Output notes for this schema:
       continue;
     }
     rules.push({
-      id: `${programId}.${r.id || `r${i}`}`.replace(/\s+/g, "_"),
+      id: `${prefix}${r.id || `r${i}`}`.replace(/\s+/g, "_"),
       programId,
       category: RULE_CATEGORIES.includes(r.category) ? r.category : r.kind === "points" ? "scoring" : "threshold",
       kind: r.kind,
@@ -354,7 +372,7 @@ Output notes for this schema:
   const complianceRules: ComplianceRule[] = (parsed.complianceRules ?? [])
     .filter((c) => c.title && COMPLIANCE_KINDS.includes(c.kind))
     .map((c, i) => ({
-      id: `${programId}.c.${c.id || i}`.replace(/\s+/g, "_"),
+      id: `${prefix}c.${c.id || i}`.replace(/\s+/g, "_"),
       programId,
       category: COMPLIANCE_CATEGORIES.includes(c.category) ? c.category : "reporting",
       title: c.title,

@@ -1,9 +1,9 @@
-import { ArrowLeft, BookOpen, ExternalLink, Lightbulb } from "lucide-react";
+import { ArrowLeft, BookMarked, BookOpen, ExternalLink, Lightbulb } from "lucide-react";
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { RuleResult } from "@shared/types";
 import { Card, CardHeader, Empty, ErrorBox, Kpi, PageHeader, PageLoading, Pill, ProgressBar, RuleStatusPill, ScoreRing } from "../components/ui";
-import { money, PROGRAM_TYPE_LABEL } from "../lib/format";
+import { money, pageRanges, PROGRAM_TYPE_LABEL, shortDate } from "../lib/format";
 import { useProjectStream } from "../lib/hooks";
 
 function RuleTable({ results, points }: { results: RuleResult[]; points: boolean }) {
@@ -127,6 +127,20 @@ export default function ProgramDetailPage() {
           <CardHeader title="About this program" />
           <div className="space-y-3 p-5 text-sm text-zinc-700">
             <p className="leading-relaxed">{program.description}</p>
+            {program.extraction && (
+              <p className="flex items-start gap-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                <BookMarked size={14} className="mt-0.5 shrink-0 text-indigo-500" />
+                <span>
+                  Rules extracted from pages <span className="tnum font-mono text-zinc-800">{pageRanges(program.extraction.relevantPages)}</span> of{" "}
+                  {program.extraction.pageCount}
+                  {program.extraction.cacheHit === "full" ? " · served from the " : " · cached in the "}
+                  <Link to="/library" className="text-indigo-700 hover:underline">
+                    rule library
+                  </Link>{" "}
+                  ({shortDate(program.extraction.extractedAt)})
+                </span>
+              </p>
+            )}
             {score?.summary && <p className="rounded-lg bg-indigo-50/60 px-3 py-2 leading-relaxed text-indigo-900">{score.summary}</p>}
             <dl className="grid gap-x-6 gap-y-2 pt-2 text-xs sm:grid-cols-2">
               <div>

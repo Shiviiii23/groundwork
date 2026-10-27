@@ -2,7 +2,11 @@ import type {
   ComplianceData,
   ComplianceEvent,
   ComplianceReport,
+  DocumentSourceInput,
   HealthInfo,
+  LibrarySource,
+  LibrarySourceDetail,
+  PipelineStats,
   Project,
   ProjectInput,
   ProjectSummary,
@@ -43,8 +47,12 @@ export const api = {
     req<{ project: Project; run: Run }>("/projects", { method: "POST", body: json(input) }),
   deleteProject: (id: string) => req<{ ok: true }>(`/projects/${id}`, { method: "DELETE" }),
   rerun: (id: string) => req<{ run: Run }>(`/projects/${id}/rerun`, { method: "POST" }),
-  addDocument: (id: string, doc: { title: string; url?: string; text: string }) =>
+  addDocument: (id: string, doc: DocumentSourceInput) =>
     req<{ run: Run }>(`/projects/${id}/documents`, { method: "POST", body: json(doc) }),
+  previewDocument: (doc: DocumentSourceInput) => req<PipelineStats>("/library/preview", { method: "POST", body: json(doc) }),
+  library: () => req<LibrarySource[]>("/library"),
+  librarySource: (key: string) => req<LibrarySourceDetail>(`/library/${encodeURIComponent(key)}`),
+  deleteLibrarySource: (key: string) => req<{ ok: true }>(`/library/${encodeURIComponent(key)}`, { method: "DELETE" }),
   setPursuit: (id: string, programId: string, pursuit: PursuitStatus) =>
     req<{ project: Project }>(`/projects/${id}/programs/${programId}`, {
       method: "PATCH",

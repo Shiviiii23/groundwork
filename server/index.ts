@@ -21,12 +21,15 @@ const { SAMPLE_PROJECTS } = await import("./data/samples");
 const { evaluateCompliance, sampleComplianceData, parseRentRollCsv } = await import("./engine/compliance");
 
 import type { NextFunction, Request, Response } from "express";
-import type { ComplianceEvent, HealthInfo, Project, ProjectInput, ProjectSummary, PursuitStatus, StreamSnapshot, TenantUnit } from "../shared/types";
+import type { ComplianceEvent, DocumentSourceInput, HealthInfo, Project, ProjectInput, ProjectSummary, PursuitStatus, StreamSnapshot, TenantUnit } from "../shared/types";
 import { fundingIdentified } from "../shared/funding";
+import { library } from "./docs/library";
+import { previewDocument } from "./docs/pipeline";
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "8mb" }));
+// Funding documents arrive as base64 PDFs; QAPs commonly run 5–30 MB.
+app.use(express.json({ limit: "60mb" }));
 
 function requireProject(req: Request, res: Response): Project | null {
   const p = store.getProject(req.params.id);
@@ -160,14 +163,48 @@ app.get("/api/projects/:id/stream", (req, res) => {
   send();
 });
 
+/** Validates a DocumentSourceInput body; returns an error message or null. */
+function documentError(b: Partial<DocumentSourceInput>): string | null {
+  if (!b || typeof b.title !== "string" || !b.title.trim()) return "title is required";
+  const sources = [b.text, b.pdfBase64, b.url, b.libraryKey].filter((x) => typeof x === "string" && x.trim());
+  if (sources.length !== 1) return "Provide exactly one of text, pdfBase64, url, or libraryKey";
+  if (b.libraryKey && !library.latest(b.libraryKey)) return "Unknown rule library source";
+  return null;
+}
+
 app.post("/api/projects/:id/documents", (req, res) => {
   const p = requireProject(req, res);
   if (!p) return;
-  const { title, url, text } = req.body ?? {};
-  if (!title || !text || typeof text !== "string") return res.status(400).json({ error: "title and text are required" });
-  if (!llmEnabled()) return res.status(400).json({ error: "Document rule extraction uses Claude — set ANTHROPIC_API_KEY on the server and restart." });
+  const body = req.body as DocumentSourceInput;
+  const err = documentError(body);
+  if (err) return res.status(400).json({ error: err });
   if (store.getRun(p.latestRunId)?.status === "running") return res.status(409).json({ error: "A run is already in progress" });
-  res.json({ run: startDocumentRun(p, { title, url, text }) });
+  // Without Claude the pipeline still serves rule-library hits; anything else stops after the free page-selection preview.
+  res.json({ run: startDocumentRun(p, body) });
+});
+
+app.post("/api/library/preview", async (req, res) => {
+  const body = req.body as DocumentSourceInput;
+  const err = documentError(body);
+  if (err) return res.status(400).json({ error: err });
+  try {
+    res.json(await previewDocument(body));
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+app.get("/api/library", (_req, res) => res.json(library.list()));
+
+app.get("/api/library/:key", (req, res) => {
+  const d = library.detail(req.params.key);
+  if (!d) return res.status(404).json({ error: "Not in rule library" });
+  res.json(d);
+});
+
+app.delete("/api/library/:key", (req, res) => {
+  if (!library.remove(req.params.key)) return res.status(404).json({ error: "Not in rule library" });
+  res.json({ ok: true });
 });
 
 app.patch("/api/projects/:id/programs/:programId", (req, res) => {
